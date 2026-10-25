@@ -83,16 +83,9 @@ class HaRendu extends rendu
             : null;
 
         /* ── Dernier enregistrement connu (veille ou antérieur) ──────── */
-        // Sert à la fois de base pour les cumulatifs ET de fallback pour les
-        // champs non encore disponibles (entre 00h00 et l'import ~6h).
-        $prevQ = "SELECT
-                      IFNULL(cumul_kg,    0) AS c_kg,
-                      IFNULL(cumul_kwh,   0) AS c_kwh,
-                      IFNULL(cumul_cycle, 0) AS c_cycle,
-                      prix_kg,
-                      prix_kwh,
-                      tc_ext_max,
-                      tc_ext_min
+        // Sert de fallback pour les champs non encore disponibles aujourd'hui
+        // (prix_kg, prix_kwh, tc_ext_max/min entre 00h00 et l'import ~6h).
+        $prevQ = "SELECT prix_kg, prix_kwh, tc_ext_max, tc_ext_min
                   FROM oko_resume_day
                   WHERE jour < '{$jour}'
                   ORDER BY jour DESC
@@ -100,10 +93,20 @@ class HaRendu extends rendu
         $prevR = $this->query($prevQ);
         $prev  = $prevR ? $prevR->fetch_object() : null;
 
-        /* ── Cumulatifs (base = veille + consommation du jour si dispo) ─ */
-        $cumulKg    = round(($prev ? (float)$prev->c_kg    : 0) + ($consoKg   ?? 0), 2);
-        $cumulKwh   = round(($prev ? (float)$prev->c_kwh   : 0) + ($consoKwh  ?? 0), 2);
-        $cumulCycle = ($prev ? (int)$prev->c_cycle : 0) + $nbCycle;
+        /* ── Cumulatifs — SUM de toutes les synthèses antérieures ───────
+         * On somme conso_* au lieu de chaîner cumul_kwh du dernier
+         * enregistrement : un gap dans oko_resume_day ne propage plus
+         * de valeur erronée. */
+        $sumQ = "SELECT IFNULL(SUM(conso_kg), 0) AS c_kg,
+                        IFNULL(SUM(conso_kwh), 0) AS c_kwh,
+                        IFNULL(SUM(nb_cycle),  0) AS c_cycle
+                 FROM oko_resume_day WHERE jour < '{$jour}'";
+        $sumR   = $this->query($sumQ);
+        $sumRow = $sumR ? $sumR->fetch_object() : null;
+
+        $cumulKg    = round(($sumRow ? (float)$sumRow->c_kg    : 0) + ($consoKg  ?? 0), 2);
+        $cumulKwh   = round(($sumRow ? (float)$sumRow->c_kwh   : 0) + ($consoKwh ?? 0), 2);
+        $cumulCycle = ($sumRow ? (int)$sumRow->c_cycle : 0) + $nbCycle;
 
         /* ── Prix au kg FIFO (estimation sur cumulatif live) ─────────── */
         $prixKgQ = "SELECT ROUND(e.price / e.quantity, 4) AS prix_kg

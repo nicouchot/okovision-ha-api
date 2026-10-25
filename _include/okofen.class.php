@@ -552,10 +552,15 @@ class okofen extends connectDb
         $nbCycle        = (null == $cycle->nbCycle)         ? 0 : (int) $cycle->nbCycle;
         $consoKwh       = round($consoPellet * PCI_PELLET * (RENDEMENT_CHAUDIERE / 100), 2);
 
-        /* ── Cumulatifs (cumul du jour précédent + valeurs du jour) ── */
-        $prevQ  = "SELECT IFNULL(cumul_kg, 0) as c_kg, IFNULL(cumul_kwh, 0) as c_kwh,
-                          IFNULL(cumul_cycle, 0) as c_cycle
-                   FROM oko_resume_day WHERE jour < '{$day}' ORDER BY jour DESC LIMIT 1";
+        /* ── Cumulatifs — SUM de toutes les synthèses antérieures ───────────
+         * On somme conso_kg/conso_kwh/nb_cycle plutôt que de chaîner cumul_kwh
+         * du dernier enregistrement. Cela évite qu'un gap dans oko_resume_day
+         * (jour manquant) ou qu'un cumul_kwh précédent erroné ne propage une
+         * valeur fausse indéfiniment. */
+        $prevQ  = "SELECT IFNULL(SUM(conso_kg), 0) AS c_kg,
+                          IFNULL(SUM(conso_kwh), 0) AS c_kwh,
+                          IFNULL(SUM(nb_cycle),  0) AS c_cycle
+                   FROM oko_resume_day WHERE jour < '{$day}'";
         $prevR  = $this->query($prevQ);
         $prev   = $prevR ? $prevR->fetch_object() : null;
 
